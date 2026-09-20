@@ -1,4 +1,4 @@
-const CACHE = 'mono-cromat-v4';
+const CACHE = 'mono-cromat-v5';
 const APP_SHELL = ['./', './index.html', './styles.css', './receipt-styles.css', './app.js', './manifest.json', './assets/logo-blue.png'];
 
 self.addEventListener('install', event => {

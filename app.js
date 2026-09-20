@@ -395,6 +395,8 @@ function openMobileMenu() { document.getElementById('sidebar').classList.add('op
 function handleClick(event) {
   const actionNode = event.target.closest('[data-action]');
   if (actionNode) {
+    // The backdrop owns close-modal, but clicks inside the dialog must not bubble into it.
+    if (actionNode.dataset.action === 'close-modal' && actionNode.classList.contains('modal-backdrop') && event.target !== actionNode) return;
     const action = actionNode.dataset.action;
     if (action === 'open-menu') openMobileMenu();
     if (action === 'close-menu') closeMobileMenu();
