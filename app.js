@@ -76,6 +76,11 @@ function loadData() {
   return JSON.parse(JSON.stringify(initialData));
 }
 function saveData() { localStorage.setItem('mono-cromat-data', JSON.stringify(data)); }
+function loadSettings() {
+  const defaults = { businessName: 'Mono Cromat & Co.', rfc: 'MCO240101AB1', phone: '55 4000 2080', currency: 'MXN — Peso mexicano', address: 'Ciudad de México, México' };
+  try { return { ...defaults, ...(JSON.parse(localStorage.getItem('mono-cromat-settings') || '{}')) }; } catch (error) { return defaults; }
+}
+function persistSettings(settings) { localStorage.setItem('mono-cromat-settings', JSON.stringify(settings)); }
 function routeFromHash() { return (location.hash.replace(/^#\/?/, '').split('?')[0] || 'inicio'); }
 function icon(name) { return ICONS[name] || ''; }
 function esc(value) { return String(value ?? '').replace(/[&<>'"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;' }[c])); }
@@ -202,14 +207,19 @@ function renderReports() {
 }
 
 function renderSettings() {
-  setPage('Ajustes', `${pageHeader('Ajustes', 'Configura tu espacio de trabajo y la experiencia de tu equipo', button('Guardar cambios', 'save-settings', 'primary', 'check'))}<div class="settings-layout"><nav class="settings-nav"><button class="active">General</button><button>Equipo y permisos</button><button>Notificaciones</button><button>Datos y respaldo</button></nav><div><article class="settings-panel"><h2>Información del negocio</h2><p>Estos datos aparecen en tus recibos y reportes.</p><div class="form-grid"><div class="form-field"><label>Nombre comercial</label><input value="Mono Cromat & Co." /></div><div class="form-field"><label>RFC</label><input value="MCO240101AB1" /></div><div class="form-field"><label>Teléfono</label><input value="55 4000 2080" /></div><div class="form-field"><label>Moneda</label><select><option>MXN — Peso mexicano</option></select></div><div class="form-field full"><label>Dirección</label><input value="Ciudad de México, México" /></div></div></article><article class="settings-panel"><h2>Preferencias de operación</h2><p>Personaliza cómo quieres trabajar dentro del panel.</p><div class="toggle-row"><div class="toggle-copy"><strong>Alertas de inventario</strong><span>Recibe una alerta cuando un producto llegue a su mínimo.</span></div><button class="toggle on" data-action="toggle-setting" aria-label="Cambiar alertas de inventario"></button></div><div class="toggle-row"><div class="toggle-copy"><strong>Recordatorios de cobranza</strong><span>Marca las cuentas vencidas para darles seguimiento.</span></div><button class="toggle on" data-action="toggle-setting" aria-label="Cambiar recordatorios"></button></div><div class="toggle-row"><div class="toggle-copy"><strong>Modo compacto en tablas</strong><span>Reduce el espacio vertical para ver más filas.</span></div><button class="toggle" data-action="toggle-setting" aria-label="Cambiar modo compacto"></button></div></article><article class="settings-panel"><h2>Respaldo de información</h2><p>Exporta tus datos para mantener una copia local de tu operación.</p><div class="heading-actions"><button class="button button-secondary" data-action="export-data">${icon('download')} Exportar datos</button><button class="button button-secondary" data-action="reset-demo">${icon('refresh')} Restaurar demo</button><button class="button button-danger" data-action="clear-data">${icon('trash')} Borrar datos de ejemplo</button></div></article></div></div>`);
+  const settings = loadSettings();
+  setPage('Ajustes', `${pageHeader('Ajustes', 'Configura tu espacio de trabajo y la experiencia de tu equipo', button('Guardar cambios', 'save-settings', 'primary', 'check'))}<div class="settings-layout"><nav class="settings-nav"><button class="active">General</button><button>Equipo y permisos</button><button>Notificaciones</button><button>Datos y respaldo</button></nav><div><article class="settings-panel"><h2>Información del negocio</h2><p>Estos datos aparecen en tus recibos y reportes.</p><div class="form-grid"><div class="form-field"><label>Nombre comercial</label><input data-setting="businessName" value="${esc(settings.businessName)}" /></div><div class="form-field"><label>RFC</label><input data-setting="rfc" value="${esc(settings.rfc)}" /></div><div class="form-field"><label>Teléfono</label><input data-setting="phone" value="${esc(settings.phone)}" /></div><div class="form-field"><label>Moneda</label><select data-setting="currency"><option ${settings.currency === 'MXN — Peso mexicano' ? 'selected' : ''}>MXN — Peso mexicano</option></select></div><div class="form-field full"><label>Dirección</label><input data-setting="address" value="${esc(settings.address)}" /></div></div></article><article class="settings-panel"><h2>Preferencias de operación</h2><p>Personaliza cómo quieres trabajar dentro del panel.</p><div class="toggle-row"><div class="toggle-copy"><strong>Alertas de inventario</strong><span>Recibe una alerta cuando un producto llegue a su mínimo.</span></div><button class="toggle on" data-action="toggle-setting" aria-label="Cambiar alertas de inventario"></button></div><div class="toggle-row"><div class="toggle-copy"><strong>Recordatorios de cobranza</strong><span>Marca las cuentas vencidas para darles seguimiento.</span></div><button class="toggle on" data-action="toggle-setting" aria-label="Cambiar recordatorios"></button></div><div class="toggle-row"><div class="toggle-copy"><strong>Modo compacto en tablas</strong><span>Reduce el espacio vertical para ver más filas.</span></div><button class="toggle" data-action="toggle-setting" aria-label="Cambiar modo compacto"></button></div></article><article class="settings-panel"><h2>Respaldo de información</h2><p>Exporta tus datos para mantener una copia local de tu operación.</p><div class="heading-actions"><button class="button button-secondary" data-action="export-data">${icon('download')} Exportar datos</button><button class="button button-secondary" data-action="reset-demo">${icon('refresh')} Restaurar demo</button><button class="button button-danger" data-action="clear-data">${icon('trash')} Borrar datos de ejemplo</button></div></article></div></div>`);
 }
 
 function openModal(title, description, body) {
   document.getElementById('modal-root').innerHTML = `<div class="modal-backdrop" data-action="close-modal"><div class="modal" role="dialog" aria-modal="true" aria-labelledby="modal-title" data-modal-inner><div class="modal-header"><div><h2 id="modal-title">${title}</h2><p>${description}</p></div><button class="icon-button modal-close" data-action="close-modal" aria-label="Cerrar">${icon('x')}</button></div><div class="modal-body">${body}</div></div></div>`;
 }
 function closeModal() { document.getElementById('modal-root').innerHTML = ''; }
-function formField(label, name, type = 'text', value = '', options = '') { return `<div class="form-field"><label for="${name}">${label}</label>${type === 'select' ? `<select id="${name}" name="${name}">${options}</select>` : `<input id="${name}" name="${name}" type="${type}" value="${esc(value)}" required />`}</div>`; }
+function formField(label, name, type = 'text', value = '', options = '') {
+  const numberAttrs = name === 'sale-quantity' ? 'min="1" step="1"' : name === 'product-stock' || name === 'product-min' ? 'min="0" step="1"' : 'min="0" step="0.01"';
+  const extraAttrs = type === 'number' ? numberAttrs : type === 'tel' ? 'inputmode="tel" autocomplete="tel"' : '';
+  return `<div class="form-field"><label for="${name}">${label}</label>${type === 'select' ? `<select id="${name}" name="${name}" required>${options}</select>` : `<input id="${name}" name="${name}" type="${type}" value="${esc(value)}" ${extraAttrs} required />`}</div>`;
+}
 function newClientModal() {
   openModal('Nuevo cliente', 'Crea una cuenta para dar seguimiento a sus compras y saldos.', `<form data-form="client"><div class="form-grid">${formField('Nombre comercial', 'client-name')}${formField('Contacto', 'client-contact')}${formField('Teléfono', 'client-phone', 'tel')}${formField('Segmento', 'client-segment', 'select', '', '<option>Mayoreo</option><option>Ruta centro</option><option>Contado</option><option>Otro</option>')}<div class="form-field full"><label for="client-notes">Notas internas</label><textarea id="client-notes" name="client-notes" placeholder="Escribe una nota opcional"></textarea></div></div><div class="form-actions"><button type="button" class="button button-secondary" data-action="close-modal">Cancelar</button><button class="button button-primary" type="submit">Guardar cliente</button></div></form>`);
 }
@@ -219,12 +229,19 @@ function newProductModal(product = null) {
 }
 function newPaymentModal(clientId = '') {
   const selected = clientId ? clientById(clientId) : null;
-  openModal('Registrar abono', 'Aplica un pago y actualiza el saldo de una cuenta.', `<form data-form="payment"><div class="form-grid">${formField('Cliente', 'payment-client', 'select', '', data.clients.filter(c => c.balance > 0).map(client => `<option value="${client.id}" ${selected?.id === client.id ? 'selected' : ''}>${esc(client.name)} · ${money(client.balance)}</option>`).join(''))}${formField('Monto', 'payment-amount', 'number', '')}${formField('Método de pago', 'payment-method', 'select', '', '<option>Efectivo</option><option>Transferencia</option><option>Tarjeta</option>')}<div class="form-field full"><label for="payment-reference">Referencia o nota</label><input id="payment-reference" name="payment-reference" placeholder="Ej. Abono de ruta" /></div></div><div class="form-actions"><button type="button" class="button button-secondary" data-action="close-modal">Cancelar</button><button class="button button-primary" type="submit">Registrar abono</button></div></form>`);
+  const openClients = data.clients.filter(c => c.balance > 0);
+  const clientOptions = openClients.length ? openClients.map(client => `<option value="${client.id}" ${selected?.id === client.id ? 'selected' : ''}>${esc(client.name)} · ${money(client.balance)}</option>`).join('') : '<option value="" selected>No hay cuentas abiertas</option>';
+  const disabled = openClients.length ? '' : 'disabled';
+  const hint = openClients.length ? '' : '<p class="form-hint">Primero registra una venta a crédito para poder aplicar un abono.</p>';
+  openModal('Registrar abono', 'Aplica un pago y actualiza el saldo de una cuenta.', `<form data-form="payment"><div class="form-grid">${formField('Cliente', 'payment-client', 'select', '', clientOptions)}${formField('Monto', 'payment-amount', 'number', '')}${formField('Método de pago', 'payment-method', 'select', '', '<option>Efectivo</option><option>Transferencia</option><option>Tarjeta</option>')}<div class="form-field full"><label for="payment-reference">Referencia o nota</label><input id="payment-reference" name="payment-reference" placeholder="Ej. Abono de ruta" /></div></div>${hint}<div class="form-actions"><button type="button" class="button button-secondary" data-action="close-modal">Cancelar</button><button class="button button-primary" type="submit" ${disabled}>Registrar abono</button></div></form>`);
 }
 function newSaleModal() {
   const clientOptions = data.clients.map(client => `<option value="${client.id}">${esc(client.name)}</option>`).join('');
-  const productOptions = data.products.map(product => `<option value="${product.sku}">${esc(product.name)} · ${money(product.price)}</option>`).join('');
-  openModal('Registrar venta', 'Crea un pedido y elige cómo quieres cobrarlo.', `<form data-form="sale"><div class="form-grid">${formField('Cliente', 'sale-client', 'select', '', `<option value="general">Cliente general</option>${clientOptions}`)}${formField('Producto principal', 'sale-product', 'select', '', productOptions)}${formField('Cantidad', 'sale-quantity', 'number', '1')}${formField('Forma de pago', 'sale-payment', 'select', '', '<option>Crédito</option><option>Efectivo</option><option>Transferencia</option>')}<div class="form-field full"><label for="sale-delivery">Entrega</label><select id="sale-delivery" name="sale-delivery"><option>Por entregar</option><option>Entregado</option></select></div></div><div class="form-actions"><button type="button" class="button button-secondary" data-action="close-modal">Cancelar</button><button class="button button-primary" type="submit">Guardar venta</button></div></form>`);
+  const hasProducts = data.products.length > 0;
+  const productOptions = hasProducts ? data.products.map(product => `<option value="${product.sku}">${esc(product.name)} · ${money(product.price)} · ${product.stock} disponibles</option>`).join('') : '<option value="" selected>No hay productos disponibles</option>';
+  const disabled = hasProducts ? '' : 'disabled';
+  const hint = hasProducts ? '<p class="form-hint">La existencia se descuenta automáticamente al guardar.</p>' : '<p class="form-hint">Agrega primero un producto en Inventario para registrar una venta.</p>';
+  openModal('Registrar venta', 'Crea un pedido y elige cómo quieres cobrarlo.', `<form data-form="sale"><div class="form-grid">${formField('Cliente', 'sale-client', 'select', '', `<option value="general">Cliente general</option>${clientOptions}`)}${formField('Producto principal', 'sale-product', 'select', '', productOptions)}${formField('Cantidad', 'sale-quantity', 'number', '1')}${formField('Forma de pago', 'sale-payment', 'select', '', '<option>Crédito</option><option>Efectivo</option><option>Transferencia</option>')}<div class="form-field full"><label for="sale-delivery">Entrega</label><select id="sale-delivery" name="sale-delivery" required><option>Por entregar</option><option>Entregado</option></select></div></div>${hint}<div class="form-actions"><button type="button" class="button button-secondary" data-action="close-modal">Cancelar</button><button class="button button-primary" type="submit" ${disabled}>Guardar venta</button></div></form>`);
 }
 function viewClientModal(client) {
   openModal(client.name, `${client.id} · ${client.segment}`, `<div class="form-grid"><div class="form-field"><label>Contacto</label><input value="${esc(client.contact)}" readonly /></div><div class="form-field"><label>Teléfono</label><input value="${esc(client.phone)}" readonly /></div><div class="form-field"><label>Facturado histórico</label><input value="${money(client.billed)}" readonly /></div><div class="form-field"><label>Saldo actual</label><input value="${money(client.balance)}" readonly /></div></div><div class="form-actions"><button class="button button-secondary" data-action="close-modal">Cerrar</button><button class="button button-primary" data-action="collect-client" data-id="${client.id}">${icon('cash')} Registrar abono</button></div>`);
@@ -269,12 +286,27 @@ function downloadReceipt(sale) {
 function handleFormSubmit(form) {
   const values = Object.fromEntries(new FormData(form).entries());
   if (form.dataset.form === 'client') {
+    const name = String(values['client-name'] || '').trim();
+    const contact = String(values['client-contact'] || '').trim();
+    const phone = String(values['client-phone'] || '').trim();
+    if (!name || !contact || !phone) return toast('Completa nombre, contacto y teléfono.', true);
+    if (data.clients.some(client => client.name.toLowerCase() === name.toLowerCase())) return toast('Ya existe un cliente con ese nombre.', true);
     const nextNumber = Math.max(0, ...data.clients.map(c => Number(c.id.replace(/\D/g, '')) || 0)) + 1;
-    data.clients.unshift({ id: `C${String(nextNumber).padStart(3, '0')}`, name: values['client-name'], segment: values['client-segment'], contact: values['client-contact'], phone: values['client-phone'], purchases: 0, billed: 0, balance: 0, overdue: 0, status: 'active', due: 'Sin compras' });
+    data.clients.unshift({ id: `C${String(nextNumber).padStart(3, '0')}`, name, segment: values['client-segment'], contact, phone, purchases: 0, billed: 0, balance: 0, overdue: 0, status: 'active', due: 'Sin compras' });
     saveData(); closeModal(); render(); toast('Cliente agregado correctamente.');
   }
   if (form.dataset.form === 'product') {
-    const product = { sku: values['product-sku'].toUpperCase(), name: values['product-name'], category: values['product-category-modal'], unit: values['product-unit'], cost: Number(values['product-cost']), price: Number(values['product-price']), stock: Number(values['product-stock']), min: Number(values['product-min']) };
+    const sku = String(values['product-sku'] || '').trim().toUpperCase();
+    const name = String(values['product-name'] || '').trim();
+    const cost = Number(values['product-cost']);
+    const price = Number(values['product-price']);
+    const stock = Number(values['product-stock']);
+    const min = Number(values['product-min']);
+    if (!sku || !name || !Number.isFinite(cost) || !Number.isFinite(price) || !Number.isFinite(stock) || !Number.isFinite(min)) return toast('Completa todos los datos del producto.', true);
+    if (cost < 0 || price <= 0 || stock < 0 || min < 0) return toast('Costo, precio e inventario deben ser valores válidos.', true);
+    if (price < cost) return toast('El precio de venta no puede ser menor al costo.', true);
+    if (data.products.some(item => item.sku === sku && item.sku !== form.dataset.editSku)) return toast('Ya existe un producto con ese SKU.', true);
+    const product = { sku, name, category: values['product-category-modal'], unit: String(values['product-unit'] || '').trim(), cost, price, stock, min };
     const index = data.products.findIndex(item => item.sku === form.dataset.editSku);
     if (index >= 0) data.products[index] = product; else data.products.unshift(product);
     saveData(); closeModal(); render(); toast(index >= 0 ? 'Producto actualizado.' : 'Producto agregado correctamente.');
@@ -282,18 +314,22 @@ function handleFormSubmit(form) {
   if (form.dataset.form === 'payment') {
     const amount = Number(values['payment-amount']);
     const client = data.clients.find(item => item.id === values['payment-client']);
-    if (!client || amount <= 0) return toast('Escribe un monto válido.', true);
-    const applied = Math.min(amount, client.balance);
-    client.balance = Math.max(0, client.balance - applied);
-    if (client.overdue > 0) client.overdue = Math.max(0, client.overdue - applied);
-    data.payments.unshift({ id: `COB-${String(data.payments.length + 5).padStart(3, '0')}`, clientId: client.id, date: '17/09/2026', amount: applied, method: values['payment-method'], reference: values['payment-reference'] || 'Abono registrado' });
-    saveData(); closeModal(); render(); toast(`Abono de ${money(applied)} registrado.`);
+    if (!client) return toast('Selecciona una cuenta abierta.', true);
+    if (!Number.isFinite(amount) || amount <= 0) return toast('Escribe un monto válido.', true);
+    if (amount > client.balance) return toast(`El abono no puede superar el saldo de ${money(client.balance)}.`, true);
+    client.balance = Math.max(0, client.balance - amount);
+    if (client.overdue > 0) client.overdue = Math.max(0, client.overdue - amount);
+    data.payments.unshift({ id: `COB-${String(data.payments.length + 5).padStart(3, '0')}`, clientId: client.id, date: '17/09/2026', amount, method: values['payment-method'], reference: String(values['payment-reference'] || '').trim() || 'Abono registrado' });
+    saveData(); closeModal(); render(); toast(`Abono de ${money(amount)} registrado.`);
   }
   if (form.dataset.form === 'sale') {
     const product = data.products.find(item => item.sku === values['sale-product']);
     const client = data.clients.find(item => item.id === values['sale-client']);
-    const quantity = Math.max(1, Number(values['sale-quantity']));
-    const total = (product?.price || 0) * quantity;
+    const quantity = Number(values['sale-quantity']);
+    if (!product) return toast('Selecciona un producto disponible.', true);
+    if (!Number.isInteger(quantity) || quantity < 1) return toast('La cantidad debe ser un número entero mayor a cero.', true);
+    if (quantity > product.stock) return toast(`Solo hay ${product.stock} unidades disponibles de ${product.name}.`, true);
+    const total = product.price * quantity;
     const paid = values['sale-payment'] === 'Crédito' ? 0 : total;
     const status = paid === total ? 'paid' : 'pending';
     const nextNumber = Math.max(0, ...data.sales.map(sale => Number(sale.id.replace(/\D/g, '')) || 0)) + 1;
@@ -340,6 +376,12 @@ function chooseCSV() {
   };
   input.click();
 }
+function saveSettings() {
+  const settings = loadSettings();
+  document.querySelectorAll('[data-setting]').forEach(field => { settings[field.dataset.setting] = field.value.trim(); });
+  persistSettings(settings);
+  toast('Cambios guardados correctamente.');
+}
 function clearAllData() {
   data = { clients: [], products: [], sales: [], payments: [] };
   saveData(); closeModal(); render(); toast('Todos los datos de ejemplo fueron borrados.');
@@ -376,7 +418,7 @@ function handleClick(event) {
     if (action === 'show-notifications') toast('No hay notificaciones nuevas.');
     if (action === 'focus-search') document.querySelector('.search-box input')?.focus();
     if (action === 'show-report-toast') toast('Reporte preparado. Puedes exportarlo cuando quieras.');
-    if (action === 'save-settings') toast('Cambios guardados correctamente.');
+    if (action === 'save-settings') saveSettings();
     if (action === 'reset-demo') { data = JSON.parse(JSON.stringify(initialData)); saveData(); render(); toast('Datos de demo restaurados.'); }
     if (action === 'clear-data' && window.confirm('¿Borrar todos los clientes, productos, ventas y abonos de ejemplo? Esta acción no se puede deshacer.')) clearAllData();
     if (action === 'toggle-setting') actionNode.classList.toggle('on');
