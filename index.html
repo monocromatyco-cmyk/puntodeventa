@@ -1,0 +1,83 @@
+<!doctype html>
+<html lang="es-MX">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="theme-color" content="#0c0d0d" />
+  <meta name="description" content="Panel operativo para Mono Cromat & Co." />
+  <link rel="manifest" href="manifest.json" />
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='16' fill='%2352e6ff'/%3E%3Cpath d='M17 47V17h8l7 14 7-14h8v30h-7V29l-8 15h-1l-8-15v18z' fill='%230c0d0d'/%3E%3C/svg%3E" />
+  <title>Mono Cromat & Co.</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="styles.css" />
+  <link rel="stylesheet" href="receipt-styles.css" />
+</head>
+<body>
+  <div id="app-shell" class="app-shell">
+    <aside class="sidebar" id="sidebar">
+      <div class="brand-block">
+        <div class="brand-logo-wrap"><img class="brand-logo" src="assets/logo-blue.png" alt="Mono Cromat &amp; Co." /></div>
+        <div class="brand-copy">
+          <strong>Operación</strong>
+          <span>Mono Cromat &amp; Co.</span>
+        </div>
+        <button class="icon-button mobile-close" data-action="close-menu" aria-label="Cerrar menú" title="Cerrar menú"><span data-icon="x"></span></button>
+      </div>
+
+      <div class="workspace-switcher">
+        <div class="avatar avatar-lime">MC</div>
+        <div class="workspace-copy">
+          <span class="eyebrow">Espacio de trabajo</span>
+          <strong>Operación general</strong>
+        </div>
+        <span class="chevron" data-icon="chevron-down"></span>
+      </div>
+
+      <nav class="main-nav" aria-label="Navegación principal">
+        <span class="nav-label">Gestión</span>
+        <a class="nav-item" href="#/inicio" data-route="inicio"><span data-icon="grid"></span><span>Resumen</span><kbd>01</kbd></a>
+        <a class="nav-item" href="#/ventas" data-route="ventas"><span data-icon="receipt"></span><span>Ventas</span><kbd>02</kbd></a>
+        <a class="nav-item" href="#/clientes" data-route="clientes"><span data-icon="users"></span><span>Clientes</span><kbd>03</kbd></a>
+        <a class="nav-item" href="#/productos" data-route="productos"><span data-icon="package"></span><span>Inventario</span><kbd>04</kbd></a>
+        <a class="nav-item" href="#/cobranza" data-route="cobranza"><span data-icon="wallet"></span><span>Cobranza</span><span class="nav-badge">2</span></a>
+        <span class="nav-label nav-label-space">Análisis</span>
+        <a class="nav-item" href="#/reportes" data-route="reportes"><span data-icon="chart"></span><span>Reportes</span></a>
+        <a class="nav-item" href="#/ajustes" data-route="ajustes"><span data-icon="settings"></span><span>Ajustes</span></a>
+      </nav>
+
+      <div class="sidebar-footer">
+        <div class="sync-status"><span class="status-dot"></span><span>Todo actualizado</span><span class="sync-time">12:45</span></div>
+        <div class="user-card">
+          <div class="avatar avatar-dark">MK</div>
+          <div class="user-copy"><strong>Mick</strong><span>Administrador</span></div>
+          <button class="icon-button" aria-label="Más opciones" title="Más opciones"><span data-icon="more"></span></button>
+        </div>
+      </div>
+    </aside>
+
+    <div class="sidebar-scrim" data-action="close-menu"></div>
+    <main class="main-content">
+      <header class="topbar">
+        <div class="topbar-left">
+          <button class="icon-button menu-trigger" data-action="open-menu" aria-label="Abrir menú" title="Abrir menú"><span data-icon="menu"></span></button>
+          <div class="breadcrumb"><span class="breadcrumb-muted">Mono Cromat</span><span data-icon="chevron-right"></span><strong id="breadcrumb-current">Resumen</strong></div>
+        </div>
+        <div class="topbar-actions">
+          <button class="topbar-date" aria-label="Fecha actual"><span data-icon="calendar"></span><span>17 septiembre 2026</span></button>
+          <button class="icon-button search-trigger" data-action="focus-search" aria-label="Buscar" title="Buscar"><span data-icon="search"></span></button>
+          <button class="icon-button notification-trigger" data-action="show-notifications" aria-label="Notificaciones" title="Notificaciones"><span data-icon="bell"></span><span class="notification-dot"></span></button>
+          <button class="topbar-avatar">MK</button>
+        </div>
+      </header>
+
+      <div class="page-wrap" id="page-content" aria-live="polite"></div>
+    </main>
+  </div>
+
+  <div class="modal-root" id="modal-root"></div>
+  <div class="toast-region" id="toast-region" aria-live="polite"></div>
+  <script src="app.js"></script>
+</body>
+</html>
