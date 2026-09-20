@@ -530,3 +530,10 @@ html, body { overflow-x: hidden; }
 .primary-cell > div { min-width: 0; }
 .primary-cell strong, .primary-cell span { overflow-wrap: anywhere; }
 .data-table td { vertical-align: middle; }
+
+.empty-state {
+  padding: 24px 8px;
+  color: var(--muted);
+  font-size: 10px;
+  text-align: center;
+}
