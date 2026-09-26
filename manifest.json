@@ -1,17 +1,27 @@
 {
+  "id": "./",
   "name": "Mono Cromat & Co.",
   "short_name": "Mono Cromat",
   "description": "Panel operativo para ventas, inventario, clientes y cobranza.",
   "start_url": "./#/inicio",
+  "scope": "./",
   "display": "standalone",
+  "display_override": ["standalone", "minimal-ui"],
   "background_color": "#f5f6f3",
   "theme_color": "#0c0d0d",
   "lang": "es-MX",
   "icons": [
     {
-      "src": "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='16' fill='%2352e6ff'/%3E%3Cpath d='M17 47V17h8l7 14 7-14h8v30h-7V29l-8 15h-1l-8-15v18z' fill='%230c0d0d'/%3E%3C/svg%3E",
-      "sizes": "64x64",
-      "type": "image/svg+xml"
+      "src": "assets/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "assets/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
     }
   ]
 }
