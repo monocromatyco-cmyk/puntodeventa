@@ -15,8 +15,10 @@
   <link rel="stylesheet" href="receipt-styles.css" />
 </head>
 <body>
-  <div id="app-shell" class="app-shell">
-    <aside class="sidebar" id="sidebar">
+  <div id="boot-screen" class="boot-screen" role="status">Conectando con tus datos…</div>
+  <section id="auth-gate" class="auth-gate" hidden aria-live="polite"></section>
+  <div id="app-shell" class="app-shell" hidden>
+    <aside class="sidebar" id="sidebar" aria-label="Menú principal" aria-hidden="true" inert>
       <div class="brand-block">
         <div class="brand-logo-wrap"><img class="brand-logo" src="assets/logo-blue.png" alt="Mono Cromat &amp; Co." /></div>
         <div class="brand-copy">
@@ -48,7 +50,7 @@
       </nav>
 
       <div class="sidebar-footer">
-        <div class="sync-status"><span class="status-dot"></span><span>Todo actualizado</span><span class="sync-time">12:45</span></div>
+        <div class="sync-status"><span class="status-dot" id="sync-dot"></span><span id="sync-label">Datos locales</span><span class="sync-time" id="sync-time"></span></div>
         <div class="user-card">
           <div class="avatar avatar-dark">MK</div>
           <div class="user-copy"><strong>Mick</strong><span>Administrador</span></div>
@@ -57,18 +59,16 @@
       </div>
     </aside>
 
-    <div class="sidebar-scrim" data-action="close-menu"></div>
-    <main class="main-content">
+    <main class="main-content" id="main-content">
       <header class="topbar">
         <div class="topbar-left">
-          <button class="icon-button menu-trigger" data-action="open-menu" aria-label="Abrir menú" title="Abrir menú"><span data-icon="menu"></span></button>
           <div class="breadcrumb"><span class="breadcrumb-muted">Mono Cromat</span><span data-icon="chevron-right"></span><strong id="breadcrumb-current">Resumen</strong></div>
         </div>
         <div class="topbar-actions">
-          <button class="topbar-date" aria-label="Fecha actual"><span data-icon="calendar"></span><span>17 septiembre 2026</span></button>
+          <div class="topbar-date" aria-label="Fecha actual"><span data-icon="calendar"></span><span id="today-label"></span></div>
           <button class="icon-button search-trigger" data-action="focus-search" aria-label="Buscar" title="Buscar"><span data-icon="search"></span></button>
           <button class="icon-button notification-trigger" data-action="show-notifications" aria-label="Notificaciones" title="Notificaciones"><span data-icon="bell"></span><span class="notification-dot"></span></button>
-          <button class="topbar-avatar">MK</button>
+          <button class="topbar-avatar" data-action="logout" aria-label="Cerrar sesión" title="Cerrar sesión">MK</button>
         </div>
       </header>
 
@@ -76,8 +76,10 @@
     </main>
   </div>
 
+  <button class="floating-menu-trigger" hidden data-action="open-menu" aria-label="Abrir menú" aria-controls="sidebar" aria-expanded="false" title="Abrir menú"><span data-icon="menu" aria-hidden="true"></span><span>Menú</span></button>
   <div class="modal-root" id="modal-root"></div>
   <div class="toast-region" id="toast-region" aria-live="polite"></div>
+  <script src="domain.js"></script>
   <script src="app.js"></script>
 </body>
 </html>
