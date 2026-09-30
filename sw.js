@@ -1,18 +1,11 @@
-const CACHE_NAME = 'mono-cromat-v7';
+const CACHE_NAME = 'mono-cromat-v8-consolidated';
 const CACHE_PREFIX = 'mono-cromat-';
 const APP_SHELL = [
-  './',
-  './index.html',
-  './styles.css',
-  './mobile-operations.css',
-  './receipt-styles.css',
-  './app.js',
-  './manifest.json',
-  './assets/logo-blue.png',
-  './assets/icon-192.png',
-  './assets/icon-512.png',
-  './assets/pwa-icon.svg'
+  './', './index.html', './styles.css', './mobile-operations.css', './receipt-styles.css',
+  './domain.js', './cloud.js', './app.js', './manifest.json', './assets/logo-blue.png',
+  './assets/icon-192.png', './assets/icon-512.png', './assets/pwa-icon.svg'
 ];
+const SHELL_URLS = new Set(APP_SHELL.map(path => new URL(path, self.registration.scope).href));
 
 self.addEventListener('install', event => {
   event.waitUntil((async () => {
@@ -25,51 +18,32 @@ self.addEventListener('install', event => {
 self.addEventListener('activate', event => {
   event.waitUntil((async () => {
     const keys = await caches.keys();
-    await Promise.all(keys
-      .filter(key => key.startsWith(CACHE_PREFIX) && key !== CACHE_NAME)
-      .map(key => caches.delete(key)));
+    await Promise.all(keys.filter(key => key.startsWith(CACHE_PREFIX) && key !== CACHE_NAME).map(key => caches.delete(key)));
     await self.clients.claim();
   })());
 });
 
 self.addEventListener('fetch', event => {
   const request = event.request;
-  if (request.method !== 'GET') return;
-
   const url = new URL(request.url);
-  if (url.origin !== self.location.origin) return;
+  // Authentication, customer/payment data and third-party requests are never
+  // intercepted, cached or replaced with an HTML offline response.
+  if (request.method !== 'GET' || url.origin !== self.location.origin || url.pathname === '/api' || url.pathname.startsWith('/api/')) return;
+  const navigation = request.mode === 'navigate';
+  if (!navigation && !SHELL_URLS.has(url.href)) return;
 
-  if (request.mode === 'navigate') {
-    event.respondWith((async () => {
-      try {
-        const response = await fetch(request);
-        if (response.ok) {
-          const cache = await caches.open(CACHE_NAME);
-          const indexRequest = new Request(new URL('./index.html', self.registration.scope));
-          await cache.put(indexRequest, response.clone());
-        }
-        return response;
-      } catch (error) {
-        return (await caches.match(request))
-          || (await caches.match(new URL('./index.html', self.registration.scope)))
-          || Response.error();
-      }
-    })());
-    return;
-  }
-
+  // Network-first prevents installed PWAs from showing the old consolidated
+  // release indefinitely. Offline fallback is limited to the public app shell.
   event.respondWith((async () => {
-    const cached = await caches.match(request);
-    if (cached) return cached;
     try {
       const response = await fetch(request);
       if (response.ok && response.type === 'basic') {
         const cache = await caches.open(CACHE_NAME);
-        await cache.put(request, response.clone());
+        await cache.put(navigation ? new URL('./index.html', self.registration.scope).href : request, response.clone());
       }
       return response;
-    } catch (error) {
-      return Response.error();
+    } catch {
+      return (await caches.match(navigation ? new URL('./index.html', self.registration.scope).href : request)) || Response.error();
     }
   })());
 });

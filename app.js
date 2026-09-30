@@ -63,7 +63,10 @@ const initialData = {
 };
 
 let data = loadData();
+let settingsState = loadLocalSettings();
 let lastSavedDataSnapshot = JSON.stringify(data);
+let cloudMode = false;
+let booting = false;
 let currentRoute = routeFromHash();
 let currentClientFilter = 'all';
 let currentProductFilter = 'all';
@@ -157,44 +160,172 @@ function normalizeData(value) {
   };
 }
 function saveData() {
+  const state = { data, settings: settingsState };
   try {
+    if (!PosDomain.isValidState(state)) throw new Error('Revisa identificadores, importes, fechas y longitudes de los campos.');
+    if (PosDomain.stateByteLength({ state, revision: cloudStore.getRevision() }) > PosDomain.MAX_STATE_BYTES) throw new Error('El espacio supera el límite de 1 MB; descarga un respaldo.');
     const snapshot = JSON.stringify(data);
-    localStorage.setItem('mono-cromat-data', snapshot);
+    if (cloudMode) {
+      if (!cloudStore.save(state)) { data = normalizeData(JSON.parse(lastSavedDataSnapshot)); return false; }
+    } else {
+      localStorage.setItem('mono-cromat-data', snapshot);
+      setSyncStatus('Guardado en este dispositivo', 'local');
+    }
     lastSavedDataSnapshot = snapshot;
     return true;
   } catch (error) {
-    console.error('No fue posible guardar los datos en este dispositivo.', error);
     if (lastSavedDataSnapshot) data = normalizeData(JSON.parse(lastSavedDataSnapshot));
-    toast('No se pudo guardar. Se revirtieron los cambios; libera espacio o descarga un respaldo.', true);
+    toast(`No se pudo guardar; se revirtieron los cambios. ${error.message}`, true);
     return false;
   }
 }
-function loadSettings() {
-  const defaults = {
-    businessName: 'Mono Cromat & Co.',
-    rfc: 'MCO240101AB1',
-    phone: '55 4000 2080',
-    email: 'hola@monocromatyco.com',
-    currency: 'MXN — Peso mexicano',
-    address: 'Ciudad de México, México',
-    preferences: { inventoryAlerts: true, collectionAlerts: true, compactTables: false }
-  };
-  try {
-    const stored = JSON.parse(localStorage.getItem('mono-cromat-settings') || '{}');
-    return { ...defaults, ...stored, preferences: { ...defaults.preferences, ...(stored.preferences || {}) } };
-  } catch (error) {
-    return defaults;
-  }
+function loadLocalSettings() {
+  try { return PosDomain.normalizeSettings(JSON.parse(localStorage.getItem('mono-cromat-settings') || '{}')); }
+  catch { return PosDomain.normalizeSettings(); }
 }
+function loadSettings() { return PosDomain.normalizeSettings(settingsState); }
 function persistSettings(settings) {
+  const next = PosDomain.normalizeSettings(settings);
   try {
-    localStorage.setItem('mono-cromat-settings', JSON.stringify(settings));
+    if (!PosDomain.isValidState({ data, settings: next })) throw new Error('Revisa los datos y las preferencias del negocio.');
+    if (cloudMode) {
+      if (!cloudStore.save({ data, settings: next })) return false;
+    } else localStorage.setItem('mono-cromat-settings', JSON.stringify(next));
+    settingsState = next;
     return true;
   } catch (error) {
-    toast('No se pudieron guardar los ajustes en este dispositivo.', true);
+    toast(`No se pudieron guardar los ajustes. ${error.message}`, true);
     return false;
   }
 }
+const cloudStore = PosCloud.createStore({
+  fetch: (...args) => fetch(...args),
+  storage: localStorage,
+  prepareLocalState: (legacyData, legacySettings) => {
+    const state = { data: legacyData, settings: PosDomain.normalizeSettings(legacySettings) };
+    if (!PosDomain.isValidState(state)) throw new Error('La copia local requiere revisión; se conserva intacta para descargarla.');
+    return { data: normalizeData(legacyData), settings: state.settings };
+  },
+  onStatus: setSyncStatus,
+  onNotice: (message, error = false) => toast(message, error),
+  onUnauthorized: message => showAuthGate(message)
+});
+
+function setSyncStatus(label, state = 'ok') {
+  const labelNode = document.getElementById('sync-label');
+  const dotNode = document.getElementById('sync-dot');
+  const timeNode = document.getElementById('sync-time');
+  if (labelNode) labelNode.textContent = label;
+  if (dotNode) dotNode.dataset.state = state;
+  if (timeNode) timeNode.textContent = state === 'ok' ? new Date().toLocaleTimeString('es-MX', { hour: '2-digit', minute: '2-digit' }) : '';
+}
+function hasLegacyData() {
+  try { return localStorage.getItem('mono-cromat-data') !== null || localStorage.getItem('mono-cromat-settings') !== null; }
+  catch { return false; }
+}
+function exportLocalBackup() {
+  try {
+    const rawData = localStorage.getItem('mono-cromat-data');
+    const rawSettings = localStorage.getItem('mono-cromat-settings');
+    if (rawData === null && rawSettings === null) return toast('No hay una copia local pendiente.');
+    let backup;
+    try {
+      backup = { format: 'mono-cromat-backup', version: 1, exportedAt: new Date().toISOString(),
+        data: JSON.parse(rawData || '{"clients":[],"products":[],"sales":[],"payments":[]}'),
+        settings: PosDomain.normalizeSettings(JSON.parse(rawSettings || '{}')) };
+    } catch {
+      backup = { format: 'mono-cromat-local-recovery', version: 1, exportedAt: new Date().toISOString(), rawData, rawSettings };
+    }
+    downloadBlob(new Blob([JSON.stringify(backup, null, 2)], { type: 'application/json;charset=utf-8' }), `mono-cromat-copia-local-${todayISO()}.json`);
+    toast('Copia local descargada. No se modificaron ni borraron los datos originales.');
+  } catch { toast('No se pudo leer la copia local de este navegador.', true); }
+}
+function showAuthGate(message = '', unavailable = false) {
+  closeModal(false); closeMobileMenu(false);
+  document.getElementById('boot-screen').hidden = true;
+  document.getElementById('app-shell').hidden = true;
+  document.querySelector('.menu-trigger').hidden = true;
+  const gate = document.getElementById('auth-gate');
+  gate.hidden = false;
+  const recovery = `${hasLegacyData() ? '<button type="button" class="button button-secondary button-full" data-action="export-local-backup">Descargar copia local sin borrar datos</button>' : ''}${cloudStore.hasPending() ? '<button type="button" class="button button-secondary button-full" data-action="export-backup">Descargar cambios pendientes</button>' : ''}`;
+  gate.innerHTML = `<main class="auth-card"><img src="assets/logo-blue.png" alt="Mono Cromat &amp; Co." class="auth-logo"><span class="eyebrow">Punto de venta</span><h1>${unavailable ? 'No pudimos conectar' : 'Inicia sesión'}</h1><p>${unavailable ? 'Revisa tu conexión y la configuración de Vercel/Neon para continuar.' : 'Ingresa la contraseña del espacio de trabajo.'}</p>${message ? `<div class="auth-message" role="alert">${esc(message)}</div>` : ''}${unavailable ? '<button type="button" class="button button-primary button-full" data-action="retry-connection">Reintentar conexión</button>' : '<form id="login-form"><label for="login-password">Contraseña</label><div class="auth-password-row"><input id="login-password" name="password" type="password" autocomplete="current-password" required maxlength="256"><button type="submit" class="button button-primary">Entrar</button></div><p class="auth-hint">Se valida en el servidor y no se guarda en este dispositivo.</p></form>'}${recovery}</main>`;
+  hydrateIcons();
+  if (!unavailable) {
+    document.getElementById('login-form').addEventListener('submit', async event => {
+      event.preventDefault();
+      const submit = event.currentTarget.querySelector('button[type="submit"]');
+      const password = new FormData(event.currentTarget).get('password');
+      submit.disabled = true; submit.textContent = 'Validando…';
+      try {
+        const response = await fetch('/api/auth/login', { method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ password }) });
+        const result = await response.json();
+        if (!response.ok) { showAuthGate(result.error || 'No se pudo iniciar sesión.'); return; }
+        await initializeCloudApp();
+      } catch (error) { showAuthGate(error.message || 'No se pudo conectar con el servidor.', true); }
+    });
+    window.requestAnimationFrame(() => document.getElementById('login-password')?.focus());
+  }
+}
+function showMainApp() {
+  document.getElementById('boot-screen').hidden = true;
+  document.getElementById('auth-gate').hidden = true;
+  document.getElementById('app-shell').hidden = false;
+  document.querySelector('.menu-trigger').hidden = false;
+  document.querySelector('[data-action="logout"]').hidden = !cloudMode;
+  const userLabel = document.getElementById('session-mode-label');
+  if (userLabel) userLabel.textContent = cloudMode ? 'Espacio compartido' : 'Operador local';
+  render(); syncMobileNavigation();
+}
+async function initializeCloudApp() {
+  const state = await cloudStore.load();
+  data = normalizeData(state.data);
+  settingsState = PosDomain.normalizeSettings(state.settings);
+  lastSavedDataSnapshot = JSON.stringify(data);
+  cloudMode = true;
+  showMainApp();
+  void cloudStore.flush();
+}
+function enableLocalMode() {
+  if (cloudStore.hasPending()) { showAuthGate('Hay cambios de la nube sin guardar. Descarga un respaldo antes de cambiar al modo local.', true); return; }
+  cloudStore.disconnect(); cloudMode = false;
+  data = loadData(); settingsState = loadLocalSettings(); lastSavedDataSnapshot = JSON.stringify(data);
+  try { localStorage.setItem('mono-cromat-local-mode', 'true'); } catch { /* Optional non-private mode marker. */ }
+  showMainApp(); setSyncStatus('Guardado en este dispositivo', 'local');
+}
+async function startApp() {
+  if (booting) return;
+  booting = true;
+  try {
+    const response = await fetch('/api/auth/session', { credentials: 'same-origin', cache: 'no-store' });
+    if (response.status === 404 && ['localhost', '127.0.0.1'].includes(location.hostname)) { enableLocalMode(); return; }
+    const session = await response.json();
+    if (session.localMode && response.ok) { enableLocalMode(); return; }
+    // A previously used demo must never bypass a configured cloud login.
+    try { localStorage.removeItem('mono-cromat-local-mode'); } catch {}
+    if (!response.ok || !session.configured) { showAuthGate(session.error || 'El servidor no está configurado.', true); return; }
+    if (!session.authenticated) { showAuthGate(); return; }
+    await initializeCloudApp();
+  } catch (error) {
+    let knownLocalMode = false;
+    try { knownLocalMode = localStorage.getItem('mono-cromat-local-mode') === 'true'; } catch {}
+    if (!cloudMode && knownLocalMode && !error.status) enableLocalMode();
+    else if (error.status === 401) showAuthGate(error.message);
+    else showAuthGate(error.message || 'No se pudo establecer conexión con la aplicación.', true);
+  } finally { booting = false; }
+}
+async function logout() {
+  if (!cloudMode) return;
+  if (cloudStore.hasPending() && !window.confirm('Hay cambios sin guardar en Neon. Descarga un respaldo antes de cerrar. ¿Descartarlos y cerrar sesión?')) return;
+  try {
+    const response = await fetch('/api/auth/logout', { method: 'POST', credentials: 'same-origin' });
+    if (!response.ok) throw new Error();
+  } catch { toast('No se pudo cerrar la sesión. Revisa tu conexión y vuelve a intentar.', true); return; }
+  cloudStore.disconnect({ discardPending: true });
+  cloudMode = false; data = { clients: [], products: [], sales: [], payments: [] };
+  settingsState = PosDomain.normalizeSettings(); lastSavedDataSnapshot = JSON.stringify(data);
+  showAuthGate();
+}
+
 function routeFromHash() { return (location.hash.replace(/^#\/?/, '').split('?')[0] || 'inicio'); }
 function icon(name) { return ICONS[name] || ''; }
 function esc(value) { return String(value ?? '').replace(/[&<>'"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;' }[c])); }
@@ -208,14 +339,8 @@ function todayISO(date = new Date()) {
   return `${year}-${month}-${day}`;
 }
 function parseAppDate(value) {
-  if (value instanceof Date) return new Date(value.getFullYear(), value.getMonth(), value.getDate());
-  const raw = String(value || '').trim();
-  let match = raw.match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/);
-  if (match) return new Date(Number(match[1]), Number(match[2]) - 1, Number(match[3]));
-  match = raw.match(/^(\d{1,2})[\/.\-](\d{1,2})[\/.\-](\d{4})$/);
-  if (match) return new Date(Number(match[3]), Number(match[2]) - 1, Number(match[1]));
-  const parsed = new Date(raw);
-  return Number.isNaN(parsed.getTime()) ? null : new Date(parsed.getFullYear(), parsed.getMonth(), parsed.getDate());
+  const date = PosDomain.parseDate(value);
+  return date ? new Date(date.getFullYear(), date.getMonth(), date.getDate()) : null;
 }
 function parseDateInput(value) {
   const raw = String(value || '').trim();
@@ -309,9 +434,7 @@ function chartMarkup(sales, days, gradientId) {
   return `<svg class="line-chart" viewBox="0 0 700 180" preserveAspectRatio="none" role="img" aria-label="Ventas por día durante ${days} días"><defs><linearGradient id="${gradientId}" x1="0" x2="0" y1="0" y2="1"><stop offset="0" stop-color="#52e6ff" stop-opacity=".38"/><stop offset="1" stop-color="#52e6ff" stop-opacity="0"/></linearGradient></defs><path class="area" fill="url(#${gradientId})" d="${area}"/><path class="line" d="${line}"/><circle class="point" cx="${points[points.length - 1].x}" cy="${points[points.length - 1].y}" r="4"/></svg><div class="chart-labels">${ticks.map(label => `<span>${esc(label)}</span>`).join('')}</div>`;
 }
 function updateNotificationIndicator() {
-  const overdueCount = overdueClientCount();
-  const lowStockCount = data.products.filter(product => product.stock <= product.min).length;
-  const count = overdueCount + lowStockCount;
+  const count = getNotifications().length;
   const dot = document.querySelector('.notification-dot');
   if (dot) dot.hidden = count === 0;
   const button = document.querySelector('.notification-trigger');
@@ -398,8 +521,7 @@ function renderDashboard() {
   const pendingOrders = data.sales.filter(sale => sale.delivery === 'Por entregar').length;
   const todaySales = salesForPeriod(1);
   const todayTotal = sumSales(todaySales);
-  const todayPayments = data.payments.filter(payment => dateKey(payment.date) === todayISO());
-  const cashCollectedToday = roundMoney(todayPayments.reduce((sum, payment) => sum + (Number(payment.amount) || 0), 0));
+  const cashCollectedToday = PosDomain.getSalesMetrics(data.sales, data.payments).collectedToday;
   const periodSales = salesForPeriod(dashboardPeriod);
   const previousSales = salesForPeriod(dashboardPeriod, dashboardPeriod);
   const periodTotal = sumSales(periodSales);
@@ -413,7 +535,7 @@ function renderDashboard() {
   const latestSaleRows = [...data.sales].sort((a, b) => (parseAppDate(b.date)?.getTime() || 0) - (parseAppDate(a.date)?.getTime() || 0)).slice(0, 4).map(sale => `<tr><td data-label="Folio" class="money">${esc(sale.id)}</td><td data-label="Cliente"><strong>${esc(clientById(sale.clientId).name)}</strong><span class="sub-text">${esc(sale.delivery)}</span></td><td data-label="Fecha">${esc(formatDate(sale.date))}</td><td data-label="Estado">${statusBadge(effectiveSaleStatus(sale))}</td><td data-label="Total" class="money">${money(sale.total)}</td><td data-label="Saldo" class="${sale.balance ? 'overdue' : ''}">${money(sale.balance)}</td></tr>`).join('') || '<tr><td class="empty-row" colspan="6">Aún no hay ventas registradas.</td></tr>';
   const hasOperationalData = Boolean(data.clients.length || data.products.length || data.sales.length);
   const operationalAlerts = [
-    preferences.collectionAlerts ? `<div class="activity-item"><span class="activity-icon">${icon('wallet')}</span><div class="activity-copy"><strong>${overdueClients} cuenta${overdueClients === 1 ? '' : 's'} con saldo vencido</strong><span>${overdueClients ? 'Revisa la cartera y prioriza el seguimiento.' : 'No hay saldos vencidos registrados.'}</span></div></div>` : '',
+    preferences.collectionReminders ? `<div class="activity-item"><span class="activity-icon">${icon('wallet')}</span><div class="activity-copy"><strong>${overdueClients} cuenta${overdueClients === 1 ? '' : 's'} con saldo vencido</strong><span>${overdueClients ? 'Revisa la cartera y prioriza el seguimiento.' : 'No hay saldos vencidos registrados.'}</span></div></div>` : '',
     preferences.inventoryAlerts ? `<div class="activity-item"><span class="activity-icon">${icon('package')}</span><div class="activity-copy"><strong>${data.products.filter(product => product.stock <= product.min).length} producto${data.products.filter(product => product.stock <= product.min).length === 1 ? '' : 's'} bajo mínimo</strong><span>Comprueba la existencia y programa reposición cuando corresponda.</span></div></div>` : ''
   ].filter(Boolean).join('');
   const greeting = new Date().getHours() < 12 ? 'Buenos días' : new Date().getHours() < 19 ? 'Buenas tardes' : 'Buenas noches';
@@ -421,7 +543,7 @@ function renderDashboard() {
     ${pageHeader(`${greeting}, Mick`, 'Lectura rápida de la operación de Mono Cromat & Co.', button('Registrar venta', 'new-sale', 'primary', 'plus'))}
     <section class="stats-grid" aria-label="Indicadores del día">
       ${statCard('Ventas de hoy', money(todayTotal), `${todaySales.length} ticket${todaySales.length === 1 ? '' : 's'} · promedio ${money(todaySales.length ? todayTotal / todaySales.length : 0)}`, 'receipt', true)}
-      ${statCard('Cobrado hoy', money(cashCollectedToday), `${todayPayments.length} movimiento${todayPayments.length === 1 ? '' : 's'} registrado${todayPayments.length === 1 ? '' : 's'}`, 'cash')}
+      ${statCard('Cobrado hoy', money(cashCollectedToday), 'Ventas cobradas y abonos recibidos hoy', 'cash')}
       ${statCard('Por cobrar', money(receivable), `${data.clients.filter(client => client.balance > 0).length} clientes con saldo`, 'wallet')}
       ${statCard('Vencido', money(overdue), `${overdueClients} cuenta${overdueClients === 1 ? '' : 's'} con vencimiento`, 'clock')}
     </section>
@@ -513,12 +635,12 @@ function renderReports() {
     margin: Math.round(((product.price - product.cost) / product.price) * 100)
   })).sort((a, b) => b.margin - a.margin).slice(0, 5);
   const productRows = products.map(product => `<tr><td data-label="Producto"><strong>${esc(product.name)}</strong><span class="sub-text">${esc(product.sku)}</span></td><td data-label="Margen"><span class="badge ${product.margin >= 0 ? 'badge-success' : 'badge-danger'}">${product.margin}%</span></td><td data-label="Precio" class="money">${money(product.price)}</td><td data-label="Stock">${product.stock} ${esc(product.unit)}</td></tr>`).join('') || '<tr><td class="empty-row" colspan="4">Agrega productos con precio para generar este indicador.</td></tr>';
-  setPage('Reportes', `${pageHeader('Reportes', 'Indicadores calculados a partir de los registros locales', `${button('Exportar ventas CSV', 'export-sales', 'secondary', 'download')}${button('Crear respaldo', 'export-backup', 'primary', 'download')}`)}<section class="sales-summary"><div class="mini-stat"><span class="mini-stat-label">Ventas · últimos ${reportPeriod} días</span><strong class="mini-stat-value">${money(periodTotal)}</strong><span class="mini-stat-meta">${periodSales.length} tickets · ${esc(periodChange(periodTotal, previousTotal))}</span></div><div class="mini-stat"><span class="mini-stat-label">Ticket promedio</span><strong class="mini-stat-value">${money(periodSales.length ? periodTotal / periodSales.length : 0)}</strong><span class="mini-stat-meta">En el periodo seleccionado</span></div><div class="mini-stat"><span class="mini-stat-label">Cartera vencida</span><strong class="mini-stat-value">${money(overdue)}</strong><span class="mini-stat-meta">Saldo total por cobrar: ${money(receivable)}</span></div></section><div class="report-grid"><article class="panel chart-card"><div class="panel-header"><div class="panel-heading"><h2>Ventas por periodo</h2><p>Importe de las ventas registradas</p></div><div class="chart-toolbar" role="group" aria-label="Periodo del reporte"><button type="button" class="chart-period ${reportPeriod === 7 ? 'active' : ''}" data-action="report-period" data-period="7" aria-pressed="${reportPeriod === 7}">7 días</button><button type="button" class="chart-period ${reportPeriod === 30 ? 'active' : ''}" data-action="report-period" data-period="30" aria-pressed="${reportPeriod === 30}">30 días</button></div></div><div class="panel-body"><div class="chart-total"><strong>${money(periodTotal)}</strong><span>${esc(periodChange(periodTotal, previousTotal))}</span></div><div class="chart-wrap"><div class="chart-grid"><span class="grid-line"></span><span class="grid-line"></span><span class="grid-line"></span><span class="grid-line"></span></div>${chartMarkup(periodSales, reportPeriod, 'report-area-fill')}</div></div></article><article class="panel"><div class="panel-header"><div class="panel-heading"><h2>Composición de cartera</h2><p>Al corriente frente a vencido</p></div></div><div class="donut-wrap"><div class="donut" role="img" aria-label="${currentShare}% al corriente y ${overdueShare}% vencido" style="background: conic-gradient(var(--ink) 0 ${currentShare}%, var(--lime-deep) ${currentShare}% 100%)"><div class="donut-center"><strong>${shortMoney(receivable)}</strong><span>Total cartera</span></div></div><div class="legend"><div class="legend-item"><i class="legend-dot"></i><span>Al corriente</span><strong>${currentShare}%</strong></div><div class="legend-item"><i class="legend-dot lime"></i><span>Vencido</span><strong>${overdueShare}%</strong></div></div></div></article><article class="panel"><div class="panel-header"><div class="panel-heading"><h2>Mejor margen por producto</h2><p>Margen bruto estimado con costo y precio capturados</p></div><a class="inline-link" href="#/productos">Ver inventario ${icon('arrow-right')}</a></div><div class="table-scroll"><table class="data-table"><thead><tr><th>Producto</th><th>Margen</th><th>Precio</th><th>Stock</th></tr></thead><tbody>${productRows}</tbody></table></div></article><article class="panel"><div class="panel-header"><div class="panel-heading"><h2>Revisión operativa</h2><p>Prioridades a partir del inventario y la cartera</p></div></div><div class="panel-body"><div class="activity-list"><div class="activity-item"><span class="activity-icon">${icon('package')}</span><div class="activity-copy"><strong>${data.products.filter(product => product.stock <= product.min).length} producto${data.products.filter(product => product.stock <= product.min).length === 1 ? '' : 's'} en o bajo mínimo</strong><span>Inventario que requiere verificación.</span></div></div><div class="activity-item"><span class="activity-icon">${icon('wallet')}</span><div class="activity-copy"><strong>${overdueClientCount()} cuenta${overdueClientCount() === 1 ? '' : 's'} con vencido</strong><span>Saldo vencido registrado: ${money(overdue)}.</span></div></div><div class="activity-item"><span class="activity-icon">${icon('truck')}</span><div class="activity-copy"><strong>${data.sales.filter(sale => sale.delivery === 'Por entregar').length} pedido${data.sales.filter(sale => sale.delivery === 'Por entregar').length === 1 ? '' : 's'} por entregar</strong><span>Actualiza el estado al completar cada entrega.</span></div></div></div></div></article></div>`);
+  setPage('Reportes', `${pageHeader('Reportes', 'Indicadores calculados a partir de los movimientos registrados', `${button('Exportar reporte CSV', 'export-report', 'secondary', 'download')}${button('Crear respaldo', 'export-backup', 'primary', 'download')}`)}<section class="sales-summary"><div class="mini-stat"><span class="mini-stat-label">Ventas · últimos ${reportPeriod} días</span><strong class="mini-stat-value">${money(periodTotal)}</strong><span class="mini-stat-meta">${periodSales.length} tickets · ${esc(periodChange(periodTotal, previousTotal))}</span></div><div class="mini-stat"><span class="mini-stat-label">Ticket promedio</span><strong class="mini-stat-value">${money(periodSales.length ? periodTotal / periodSales.length : 0)}</strong><span class="mini-stat-meta">En el periodo seleccionado</span></div><div class="mini-stat"><span class="mini-stat-label">Cartera vencida</span><strong class="mini-stat-value">${money(overdue)}</strong><span class="mini-stat-meta">Saldo total por cobrar: ${money(receivable)}</span></div></section><div class="report-grid"><article class="panel chart-card"><div class="panel-header"><div class="panel-heading"><h2>Ventas por periodo</h2><p>Importe de las ventas registradas</p></div><div class="chart-toolbar" role="group" aria-label="Periodo del reporte"><button type="button" class="chart-period ${reportPeriod === 7 ? 'active' : ''}" data-action="report-period" data-period="7" aria-pressed="${reportPeriod === 7}">7 días</button><button type="button" class="chart-period ${reportPeriod === 30 ? 'active' : ''}" data-action="report-period" data-period="30" aria-pressed="${reportPeriod === 30}">30 días</button></div></div><div class="panel-body"><div class="chart-total"><strong>${money(periodTotal)}</strong><span>${esc(periodChange(periodTotal, previousTotal))}</span></div><div class="chart-wrap"><div class="chart-grid"><span class="grid-line"></span><span class="grid-line"></span><span class="grid-line"></span><span class="grid-line"></span></div>${chartMarkup(periodSales, reportPeriod, 'report-area-fill')}</div></div></article><article class="panel"><div class="panel-header"><div class="panel-heading"><h2>Estado de cartera</h2><p>Al corriente frente a vencido</p></div></div><div class="donut-wrap"><div class="donut" role="img" aria-label="${currentShare}% al corriente y ${overdueShare}% vencido" style="background: conic-gradient(var(--ink) 0 ${currentShare}%, var(--lime-deep) ${currentShare}% 100%)"><div class="donut-center"><strong>${shortMoney(receivable)}</strong><span>Total cartera</span></div></div><div class="legend"><div class="legend-item"><i class="legend-dot"></i><span>Al corriente</span><strong>${currentShare}%</strong></div><div class="legend-item"><i class="legend-dot lime"></i><span>Vencido</span><strong>${overdueShare}%</strong></div></div></div></article><article class="panel"><div class="panel-header"><div class="panel-heading"><h2>Mejor margen por producto</h2><p>Margen bruto estimado con costo y precio capturados</p></div><a class="inline-link" href="#/productos">Ver inventario ${icon('arrow-right')}</a></div><div class="table-scroll"><table class="data-table"><thead><tr><th>Producto</th><th>Margen</th><th>Precio</th><th>Stock</th></tr></thead><tbody>${productRows}</tbody></table></div></article><article class="panel"><div class="panel-header"><div class="panel-heading"><h2>Revisión operativa</h2><p>Prioridades a partir del inventario y la cartera</p></div></div><div class="panel-body"><div class="activity-list"><div class="activity-item"><span class="activity-icon">${icon('package')}</span><div class="activity-copy"><strong>${data.products.filter(product => product.stock <= product.min).length} producto${data.products.filter(product => product.stock <= product.min).length === 1 ? '' : 's'} en o bajo mínimo</strong><span>Inventario que requiere verificación.</span></div></div><div class="activity-item"><span class="activity-icon">${icon('wallet')}</span><div class="activity-copy"><strong>${overdueClientCount()} cuenta${overdueClientCount() === 1 ? '' : 's'} con vencido</strong><span>Saldo vencido registrado: ${money(overdue)}.</span></div></div><div class="activity-item"><span class="activity-icon">${icon('truck')}</span><div class="activity-copy"><strong>${data.sales.filter(sale => sale.delivery === 'Por entregar').length} pedido${data.sales.filter(sale => sale.delivery === 'Por entregar').length === 1 ? '' : 's'} por entregar</strong><span>Actualiza el estado al completar cada entrega.</span></div></div></div></div></article></div>`);
 }
 function renderSettings() {
   const settings = loadSettings();
   const preferences = settings.preferences;
-  setPage('Ajustes', `${pageHeader('Ajustes', 'Configura los datos del negocio y respalda la información local', button('Guardar cambios', 'save-settings', 'primary', 'check'))}<div class="settings-layout"><nav class="settings-nav" aria-label="Secciones de ajustes"><button type="button" class="active" aria-current="true" data-action="scroll-settings" data-target="settings-general">Negocio</button><button type="button" data-action="scroll-settings" data-target="settings-preferences">Preferencias</button><button type="button" data-action="scroll-settings" data-target="settings-backup">Respaldo y datos</button></nav><div><article class="settings-panel" id="settings-general"><h2>Información del negocio</h2><p>Estos datos se usan en recibos y referencias internas.</p><div class="form-grid"><div class="form-field"><label for="setting-businessName">Nombre comercial</label><input id="setting-businessName" data-setting="businessName" value="${esc(settings.businessName)}" autocomplete="organization" /></div><div class="form-field"><label for="setting-rfc">RFC</label><input id="setting-rfc" data-setting="rfc" value="${esc(settings.rfc)}" autocomplete="off" /></div><div class="form-field"><label for="setting-phone">Teléfono</label><input id="setting-phone" data-setting="phone" type="tel" value="${esc(settings.phone)}" autocomplete="tel" /></div><div class="form-field"><label for="setting-email">Correo electrónico</label><input id="setting-email" data-setting="email" type="email" value="${esc(settings.email)}" autocomplete="email" /></div><div class="form-field"><label for="setting-currency">Moneda</label><select id="setting-currency" data-setting="currency"><option ${settings.currency === 'MXN — Peso mexicano' ? 'selected' : ''}>MXN — Peso mexicano</option></select></div><div class="form-field full"><label for="setting-address">Dirección</label><input id="setting-address" data-setting="address" value="${esc(settings.address)}" autocomplete="street-address" /></div></div></article><article class="settings-panel" id="settings-preferences"><h2>Preferencias de operación</h2><p>Controlan avisos visibles en el panel; no activan notificaciones del sistema.</p><div class="toggle-row"><div class="toggle-copy"><strong>Alertas de inventario</strong><span>Muestra avisos cuando un producto está en o bajo el mínimo.</span></div><button type="button" class="toggle ${preferences.inventoryAlerts ? 'on' : ''}" data-action="toggle-setting" data-setting-toggle="inventoryAlerts" aria-label="Cambiar alertas de inventario" aria-pressed="${Boolean(preferences.inventoryAlerts)}"></button></div><div class="toggle-row"><div class="toggle-copy"><strong>Alertas de cobranza</strong><span>Muestra el seguimiento de saldos vencidos en el resumen.</span></div><button type="button" class="toggle ${preferences.collectionAlerts ? 'on' : ''}" data-action="toggle-setting" data-setting-toggle="collectionAlerts" aria-label="Cambiar alertas de cobranza" aria-pressed="${Boolean(preferences.collectionAlerts)}"></button></div><div class="toggle-row"><div class="toggle-copy"><strong>Tablas compactas</strong><span>Reduce el espacio entre filas para consultar más registros.</span></div><button type="button" class="toggle ${preferences.compactTables ? 'on' : ''}" data-action="toggle-setting" data-setting-toggle="compactTables" aria-label="Cambiar modo compacto" aria-pressed="${Boolean(preferences.compactTables)}"></button></div></article><article class="settings-panel" id="settings-backup"><h2>Respaldo y datos</h2><p>Esta versión guarda la información en el almacenamiento local de este navegador. El respaldo JSON incluye clientes, productos, ventas, abonos y ajustes. No hay sincronización entre dispositivos ni usuarios.</p><div class="heading-actions"><button type="button" class="button button-primary" data-action="export-backup">${icon('download')} Descargar respaldo completo</button><button type="button" class="button button-secondary" data-action="import-backup">${icon('upload')} Restaurar respaldo JSON</button><button type="button" class="button button-secondary" data-action="export-data">${icon('download')} Exportar lista CSV</button></div><details class="settings-danger-zone"><summary>Acciones de mantenimiento</summary><p>Estas acciones reemplazan o eliminan información de este dispositivo.</p><div class="heading-actions"><button type="button" class="button button-secondary" data-action="reset-demo">${icon('refresh')} Reemplazar por datos demo</button><button type="button" class="button button-danger" data-action="clear-data">${icon('trash')} Borrar datos locales</button></div></details></article></div></div>`);
+  setPage('Ajustes', `${pageHeader('Ajustes', 'Configura el negocio, sus preferencias y los respaldos', button('Guardar cambios', 'save-settings', 'primary', 'check'))}<div class="settings-layout"><nav class="settings-nav" aria-label="Secciones de ajustes"><button type="button" class="active" aria-current="true" data-action="scroll-settings" data-target="settings-general">Negocio</button><button type="button" data-action="scroll-settings" data-target="settings-preferences">Preferencias</button><button type="button" data-action="scroll-settings" data-target="settings-backup">Respaldo y datos</button></nav><div><article class="settings-panel" id="settings-general"><h2>Información del negocio</h2><p>Estos datos se usan en recibos y referencias internas.</p><div class="form-grid"><div class="form-field"><label for="setting-businessName">Nombre comercial</label><input id="setting-businessName" data-setting="businessName" value="${esc(settings.businessName)}" autocomplete="organization" /></div><div class="form-field"><label for="setting-rfc">RFC</label><input id="setting-rfc" data-setting="rfc" value="${esc(settings.rfc)}" autocomplete="off" /></div><div class="form-field"><label for="setting-phone">Teléfono</label><input id="setting-phone" data-setting="phone" type="tel" value="${esc(settings.phone)}" autocomplete="tel" /></div><div class="form-field"><label for="setting-email">Correo electrónico</label><input id="setting-email" data-setting="email" type="email" value="${esc(settings.email)}" autocomplete="email" /></div><div class="form-field"><label for="setting-currency">Moneda</label><select id="setting-currency" data-setting="currency"><option ${settings.currency === 'MXN — Peso mexicano' ? 'selected' : ''}>MXN — Peso mexicano</option></select></div><div class="form-field full"><label for="setting-address">Dirección</label><input id="setting-address" data-setting="address" value="${esc(settings.address)}" autocomplete="street-address" /></div></div></article><article class="settings-panel" id="settings-preferences"><h2>Preferencias de operación</h2><p>Controlan avisos visibles en el panel; no activan notificaciones del sistema.</p><div class="toggle-row"><div class="toggle-copy"><strong>Alertas de inventario</strong><span>Muestra avisos cuando un producto está en o bajo el mínimo.</span></div><button type="button" class="toggle ${preferences.inventoryAlerts ? 'on' : ''}" data-action="toggle-setting" data-setting-toggle="inventoryAlerts" aria-label="Cambiar alertas de inventario" aria-pressed="${Boolean(preferences.inventoryAlerts)}"></button></div><div class="toggle-row"><div class="toggle-copy"><strong>Alertas de cobranza</strong><span>Muestra el seguimiento de saldos vencidos en el resumen.</span></div><button type="button" class="toggle ${preferences.collectionReminders ? 'on' : ''}" data-action="toggle-setting" data-setting-toggle="collectionReminders" aria-label="Cambiar alertas de cobranza" aria-pressed="${Boolean(preferences.collectionReminders)}"></button></div><div class="toggle-row"><div class="toggle-copy"><strong>Tablas compactas</strong><span>Reduce el espacio entre filas para consultar más registros.</span></div><button type="button" class="toggle ${preferences.compactTables ? 'on' : ''}" data-action="toggle-setting" data-setting-toggle="compactTables" data-preference="compactTables" aria-label="Cambiar modo compacto" aria-pressed="${Boolean(preferences.compactTables)}"></button></div></article><article class="settings-panel" id="settings-backup"><h2>Respaldo y datos</h2><p>${cloudMode ? 'Neon guarda los datos compartidos del espacio. Los cambios pendientes permanecen solo en esta pantalla hasta confirmarse; no cierres ni recargues sin respaldarlos.' : 'Modo local: los datos viven en este navegador y no se sincronizan con otros dispositivos.'} El respaldo JSON incluye clientes, productos, ventas, abonos y ajustes.</p><div class="heading-actions"><button type="button" class="button button-primary" data-action="export-backup">${icon('download')} Descargar respaldo completo</button><button type="button" class="button button-secondary" data-action="import-backup">${icon('upload')} Restaurar respaldo JSON</button><button type="button" class="button button-secondary" data-action="export-data">${icon('download')} Exportar lista CSV</button></div>${cloudMode && hasLegacyData() ? '<p class="local-mode-note">Se conserva una copia local que no reemplazó los datos de Neon. <button type="button" class="inline-link" data-action="export-local-backup">Descargar copia local</button></p>' : ''}<details class="settings-danger-zone"><summary>Acciones de mantenimiento</summary><p>${cloudMode ? 'Estas acciones cambian los datos compartidos para todos los dispositivos. Descarga un respaldo antes de continuar.' : 'Estas acciones reemplazan o eliminan información de este dispositivo.'}</p><div class="heading-actions">${cloudMode ? '' : `<button type="button" class="button button-secondary" data-action="reset-demo">${icon('refresh')} Reemplazar por datos demo</button>`}<button type="button" class="button button-danger" data-action="clear-data">${icon('trash')} ${cloudMode ? 'Borrar datos compartidos' : 'Borrar datos locales'}</button></div></details></article></div></div>`);
 }
 function openModal(title, description, body, modalClass = '') {
   if (!document.querySelector('#modal-root [data-modal-inner]')) modalReturnFocus = document.activeElement;
@@ -893,6 +1015,18 @@ function exportCSV(rows, filename) {
   downloadBlob(new Blob([`\ufeff${csv}`], { type: 'text/csv;charset=utf-8;' }), filename);
   toast('Archivo CSV listo para descargar.');
 }
+function exportReport() {
+  const sales = salesForPeriod(reportPeriod);
+  const total = sumSales(sales);
+  exportCSV([
+    ['Indicador', 'Valor'], ['Periodo en días', reportPeriod], ['Ventas del periodo', total],
+    ['Tickets del periodo', sales.length], ['Ticket promedio', sales.length ? roundMoney(total / sales.length) : 0],
+    ['Cartera total', roundMoney(data.clients.reduce((sum, client) => sum + client.balance, 0))],
+    ['Cartera vencida', totalOverdueBalance()], ['Cuentas vencidas', overdueClientCount()],
+    ['Productos en/bajo mínimo', data.products.filter(product => product.stock <= product.min).length],
+    ['Pedidos por entregar', data.sales.filter(sale => sale.delivery === 'Por entregar').length]
+  ], `mono-cromat-reporte-${reportPeriod}-dias.csv`);
+}
 function exportData() {
   exportCSV([
     ['Tipo', 'Identificador', 'Nombre', 'Contacto / categoría', 'Teléfono / unidad', 'Cantidad', 'Facturado / costo', 'Saldo / precio', 'Vencido / mínimo'],
@@ -904,6 +1038,7 @@ function exportBackup() {
   const backup = {
     format: 'mono-cromat-backup',
     version: 1,
+    syncPending: cloudMode && cloudStore.hasPending(),
     exportedAt: new Date().toISOString(),
     data,
     settings: loadSettings()
@@ -914,31 +1049,33 @@ function exportBackup() {
 }
 function chooseBackup() {
   const input = document.createElement('input');
-  input.type = 'file';
-  input.accept = '.json,application/json';
+  input.type = 'file'; input.accept = '.json,application/json';
   input.onchange = async () => {
     const file = input.files?.[0];
     if (!file) return;
     try {
-      const backup = JSON.parse(await file.text());
-      if (backup?.format !== 'mono-cromat-backup' || !backup.data || !Array.isArray(backup.data.clients) || !Array.isArray(backup.data.products) || !Array.isArray(backup.data.sales) || !Array.isArray(backup.data.payments)) {
-        return toast('El archivo no es un respaldo válido de Mono Cromat.', true);
+      if (file.size > 10_000_000) return toast('El archivo de respaldo supera el límite de 10 MB.', true);
+      const restored = PosDomain.readBackup(JSON.parse(await file.text()));
+      if (!window.confirm(`Restaurar reemplazará clientes, inventario, ventas, abonos y ajustes ${cloudMode ? 'compartidos en Neon para todos los dispositivos' : 'de este navegador'}. ¿Continuar?`)) return;
+      if (cloudMode) {
+        if (!cloudStore.save(restored)) return;
+      } else {
+        const previousData = localStorage.getItem('mono-cromat-data');
+        const previousSettings = localStorage.getItem('mono-cromat-settings');
+        try {
+          localStorage.setItem('mono-cromat-data', JSON.stringify(restored.data));
+          localStorage.setItem('mono-cromat-settings', JSON.stringify(restored.settings));
+        } catch (error) {
+          try {
+            if (previousData === null) localStorage.removeItem('mono-cromat-data'); else localStorage.setItem('mono-cromat-data', previousData);
+            if (previousSettings === null) localStorage.removeItem('mono-cromat-settings'); else localStorage.setItem('mono-cromat-settings', previousSettings);
+          } catch { /* Keep the previous in-memory state and surface the failure. */ }
+          throw error;
+        }
       }
-      if (!window.confirm('Restaurar este respaldo reemplazará clientes, productos, ventas, abonos y ajustes locales. ¿Deseas continuar?')) return;
-      const previousSettings = loadSettings();
-      const restoredSettings = { ...previousSettings, ...(backup.settings || {}), preferences: { ...previousSettings.preferences, ...(backup.settings?.preferences || {}) } };
-      data = normalizeData(backup.data);
-      if (!persistSettings(restoredSettings)) return;
-      if (!saveData()) {
-        persistSettings(previousSettings);
-        return;
-      }
-      render();
-      toast('Respaldo restaurado correctamente.');
-    } catch (error) {
-      console.error('No se pudo restaurar el respaldo.', error);
-      toast('No se pudo leer el archivo de respaldo. Verifica que sea un JSON válido.', true);
-    }
+      data = normalizeData(restored.data); settingsState = restored.settings; lastSavedDataSnapshot = JSON.stringify(data);
+      render(); toast('Respaldo restaurado correctamente.');
+    } catch (error) { toast(`No se restauró ningún dato. ${error.message || 'Revisa el formato o el espacio disponible.'}`, true); }
   };
   input.click();
 }
@@ -1020,7 +1157,7 @@ function chooseCSV() {
           const balance = csvNumber(value(row, ['saldo']), 0);
           const overdue = csvNumber(value(row, ['vencido']), 0);
           const purchases = csvNumber(value(row, ['compras']), 0);
-          if (!name || !Number.isFinite(billed) || !Number.isFinite(balance) || !Number.isFinite(overdue) || !Number.isInteger(purchases) || billed < 0 || balance < 0 || overdue < 0 || overdue > balance || purchases < 0 || data.clients.some(client => client.id.toLowerCase() === id.toLowerCase() || client.name.toLowerCase() === name.toLowerCase())) { skipped += 1; return; }
+          if (!name || !PosDomain.isValidIdentifier(id) || !Number.isFinite(billed) || !Number.isFinite(balance) || !Number.isFinite(overdue) || !Number.isInteger(purchases) || billed < 0 || balance < 0 || overdue < 0 || overdue > balance || purchases < 0 || data.clients.some(client => client.id.toLowerCase() === id.toLowerCase() || client.name.toLowerCase() === name.toLowerCase())) { skipped += 1; return; }
           data.clients.push({ id, name, segment: value(row, ['segmento', 'tipo']) || 'General', contact: value(row, ['contacto']), phone: value(row, ['telefono']), purchases, billed, balance, overdue, status: overdue > 0 ? 'overdue' : 'active', due: value(row, ['vencimiento', 'fecha de vencimiento']) || (balance ? 'Por revisar' : 'Sin compras') });
           imported += 1;
           return;
@@ -1032,7 +1169,7 @@ function chooseCSV() {
         const cost = csvNumber(value(row, ['costo']), 0);
         const stock = csvNumber(value(row, ['existencia', 'stock']), 0);
         const min = csvNumber(value(row, ['minimo', 'min']), 5);
-        if (!name || !Number.isFinite(price) || !Number.isFinite(cost) || !Number.isInteger(stock) || !Number.isInteger(min) || price <= 0 || cost < 0 || price < cost || stock < 0 || min < 0 || data.products.some(product => product.sku.toLowerCase() === sku.toLowerCase())) { skipped += 1; return; }
+        if (!name || !PosDomain.isValidIdentifier(sku) || !Number.isFinite(price) || !Number.isFinite(cost) || !Number.isInteger(stock) || !Number.isInteger(min) || price <= 0 || cost < 0 || price < cost || stock < 0 || min < 0 || data.products.some(product => product.sku.toLowerCase() === sku.toLowerCase())) { skipped += 1; return; }
         data.products.push({ sku, name, category: value(row, ['categoria']) || 'General', unit: value(row, ['unidad']) || 'pza', cost, price, stock, min });
         imported += 1;
       });
@@ -1067,9 +1204,10 @@ function clearAllData() {
   data = { clients: [], products: [], sales: [], payments: [] };
   currentClientFilter = 'all'; currentClientSort = 'balance'; currentProductFilter = 'all'; currentProductCategory = 'all'; currentSalesFilter = 'all'; searchTerm = '';
   if (!saveData()) return;
-  closeModal(); render(); toast('Los datos locales se borraron correctamente.');
+  closeModal(); render(); toast('Se borraron los registros del espacio correctamente.');
 }
 function toast(message, error = false) {
+  if (!error && cloudMode && cloudStore.hasPending()) message += ' Pendiente de sincronización con Neon.';
   const region = document.getElementById('toast-region');
   const node = document.createElement('div');
   node.className = 'toast';
@@ -1079,9 +1217,6 @@ function toast(message, error = false) {
   region.appendChild(node);
   setTimeout(() => node.remove(), 3400);
 }
-function isMobileViewport() {
-  return window.matchMedia ? window.matchMedia('(max-width: 780px)').matches : Number(window.innerWidth || 1024) <= 780;
-}
 function closeMobileMenu(restoreFocus = false) {
   const sidebar = document.getElementById('sidebar');
   const trigger = document.querySelector('.menu-trigger');
@@ -1089,48 +1224,41 @@ function closeMobileMenu(restoreFocus = false) {
   sidebar?.classList.remove('open');
   document.body.classList.remove('menu-open');
   trigger?.setAttribute('aria-expanded', 'false');
-  const mobile = isMobileViewport();
-  if (sidebar) {
-    sidebar.inert = mobile;
-    sidebar.setAttribute('aria-hidden', String(mobile));
-  }
+  if (sidebar) { sidebar.inert = true; sidebar.setAttribute('aria-hidden', 'true'); }
+  const main = document.getElementById('main-content');
+  if (main) main.inert = false;
   if (restoreFocus && wasOpen) trigger?.focus();
   else if (wasOpen) window.requestAnimationFrame(() => document.querySelector('#page-content h1')?.focus());
 }
 function openMobileMenu() {
   const sidebar = document.getElementById('sidebar');
   const trigger = document.querySelector('.menu-trigger');
-  if (sidebar) {
-    sidebar.inert = false;
-    sidebar.setAttribute('aria-hidden', 'false');
-    sidebar.classList.add('open');
-  }
+  if (sidebar) { sidebar.inert = false; sidebar.setAttribute('aria-hidden', 'false'); sidebar.classList.add('open'); }
+  const main = document.getElementById('main-content');
+  if (main) main.inert = true;
   document.body.classList.add('menu-open');
   trigger?.setAttribute('aria-expanded', 'true');
   window.requestAnimationFrame(() => sidebar?.querySelector('.mobile-close')?.focus());
 }
 function syncMobileNavigation() {
   const sidebar = document.getElementById('sidebar');
-  if (!sidebar) return;
-  if (!isMobileViewport()) {
-    sidebar.inert = false;
-    sidebar.setAttribute('aria-hidden', 'false');
-    sidebar.classList.remove('open');
-    document.body.classList.remove('menu-open');
-    document.querySelector('.menu-trigger')?.setAttribute('aria-expanded', 'false');
-  } else if (!sidebar.classList.contains('open')) {
-    sidebar.inert = true;
-    sidebar.setAttribute('aria-hidden', 'true');
-  }
+  if (sidebar && !sidebar.classList.contains('open')) { sidebar.inert = true; sidebar.setAttribute('aria-hidden', 'true'); }
 }
-
-function showNotifications() {
-  const low = data.products.filter(product => product.stock <= product.min);
+function getNotifications() {
+  const preferences = loadSettings().preferences;
+  const alerts = [];
+  const lowStock = data.products.filter(product => Number(product.stock) <= Number(product.min));
   const overdue = data.clients.filter(client => clientOverdueBalance(client) > 0);
-  const messages = [];
-  if (low.length) messages.push(`${low.length} producto${low.length === 1 ? '' : 's'} en o bajo mínimo`);
-  if (overdue.length) messages.push(`${overdue.length} cuenta${overdue.length === 1 ? '' : 's'} con saldo vencido`);
-  toast(messages.length ? `Alertas operativas: ${messages.join('; ')}.` : 'No hay alertas operativas pendientes.');
+  const undelivered = data.sales.filter(sale => sale.delivery === 'Por entregar');
+  if (preferences.inventoryAlerts && lowStock.length) alerts.push({ icon: 'package', title: `${lowStock.length} producto${lowStock.length === 1 ? '' : 's'} bajo mínimo`, detail: lowStock.slice(0, 3).map(product => `${product.name} (${product.stock} disponibles)`).join(' · '), route: 'productos', action: 'go-inventory', label: 'Revisar inventario' });
+  if (preferences.collectionReminders && overdue.length) alerts.push({ icon: 'wallet', title: `${overdue.length} cuenta${overdue.length === 1 ? '' : 's'} con saldo vencido`, detail: `Monto vencido: ${money(overdue.reduce((sum, client) => sum + clientOverdueBalance(client), 0))}.`, route: 'cobranza', action: 'go-collections', label: 'Ver cobranza' });
+  if (undelivered.length) alerts.push({ icon: 'truck', title: `${undelivered.length} pedido${undelivered.length === 1 ? '' : 's'} por entregar`, detail: 'Actualiza el estado cuando completes la entrega.', route: 'ventas', action: 'go-sales', label: 'Ver ventas' });
+  return alerts;
+}
+function showNotifications() {
+  const alerts = getNotifications();
+  const body = alerts.length ? `<div class="notification-list">${alerts.map(alert => `<article class="notification-item"><span class="activity-icon">${icon(alert.icon)}</span><div><strong>${esc(alert.title)}</strong><p>${esc(alert.detail)}</p><button class="inline-link notification-link" data-action="${alert.action}">${esc(alert.label)} ${icon('arrow-right')}</button></div></article>`).join('')}</div>` : '<div class="empty-state">No hay avisos pendientes. Tu operación está al día.</div>';
+  openModal('Avisos operativos', 'Alertas basadas en el inventario, la cobranza y las entregas actuales.', body);
 }
 function handleClick(event) {
   const actionNode = event.target.closest?.('[data-action]');
@@ -1182,6 +1310,13 @@ function handleClick(event) {
       }
     }
     if (action === 'export-data') exportData();
+    if (action === 'export-report') exportReport();
+    if (action === 'export-local-backup') exportLocalBackup();
+    if (action === 'retry-connection') void startApp();
+    if (action === 'logout') void logout();
+    if (['go-inventory', 'go-collections', 'go-sales'].includes(action)) {
+      closeModal(); location.hash = `#/${action === 'go-inventory' ? 'productos' : action === 'go-collections' ? 'cobranza' : 'ventas'}`;
+    }
     if (action === 'export-backup') exportBackup();
     if (action === 'import-backup') chooseBackup();
     if (action === 'export-sales') exportCSV([['Folio', 'Cliente', 'Fecha', 'Vencimiento', 'Estado', 'Entrega', 'Total', 'Saldo'], ...data.sales.map(sale => [sale.id, clientById(sale.clientId).name, formatDate(sale.date), saleDueLabel(sale), effectiveSaleStatus(sale), sale.delivery, sale.total, sale.balance])], 'mono-cromat-ventas.csv');
@@ -1211,7 +1346,7 @@ function handleClick(event) {
       reportPeriod = Number(actionNode.dataset.period) === 7 ? 7 : 30;
       renderCurrentPage();
     }
-    if (action === 'reset-demo') {
+    if (action === 'reset-demo' && !cloudMode) {
       if (window.confirm('Esto reemplazará todos los datos locales por registros de demostración. Descarga un respaldo si necesitas conservarlos. ¿Continuar?')) {
         data = normalizeData(JSON.parse(JSON.stringify(initialData)));
         currentClientFilter = 'all'; currentClientSort = 'balance'; currentProductFilter = 'all'; currentProductCategory = 'all'; currentSalesFilter = 'all'; searchTerm = '';
@@ -1219,10 +1354,10 @@ function handleClick(event) {
         render(); toast('Se restauraron los datos de demostración.');
       }
     }
-    if (action === 'clear-data' && window.confirm('¿Eliminar todos los clientes, productos, ventas y abonos de este dispositivo? Esta acción no se puede deshacer.')) clearAllData();
+    if (action === 'clear-data' && window.confirm(`¿Eliminar clientes, productos, ventas y abonos ${cloudMode ? 'del espacio compartido en Neon' : 'de este dispositivo'}? Descarga un respaldo; no se puede deshacer.`)) clearAllData();
     if (action === 'toggle-setting') {
       const setting = actionNode.dataset.settingToggle;
-      const allowed = ['inventoryAlerts', 'collectionAlerts', 'compactTables'];
+      const allowed = ['inventoryAlerts', 'collectionReminders', 'compactTables'];
       if (allowed.includes(setting)) {
         const settings = loadSettings();
         settings.preferences[setting] = !settings.preferences[setting];
@@ -1281,7 +1416,7 @@ function handleChange(event) {
 function handleKeydown(event) {
   const modal = document.querySelector('#modal-root [data-modal-inner]');
   const sidebar = document.getElementById('sidebar');
-  const menuIsModal = Boolean(isMobileViewport() && sidebar?.classList.contains('open'));
+  const menuIsModal = Boolean(sidebar?.classList.contains('open'));
   if (event.key === 'Escape') {
     if (modal) { event.preventDefault(); closeModal(true); return; }
     if (menuIsModal) { event.preventDefault(); closeMobileMenu(true); return; }
@@ -1306,9 +1441,12 @@ document.addEventListener('input', handleInput);
 document.addEventListener('change', handleChange);
 document.addEventListener('keydown', handleKeydown);
 document.addEventListener('submit', handleSubmit);
-window.addEventListener('hashchange', render);
+window.addEventListener('hashchange', () => { if (!document.getElementById('app-shell').hidden) render(); });
 window.addEventListener('resize', syncMobileNavigation);
-render();
-syncMobileNavigation();
+void startApp();
+window.addEventListener('online', () => { if (cloudMode) void cloudStore.flush(); });
+window.addEventListener('beforeunload', event => {
+  if (cloudStore.hasPending()) { event.preventDefault(); event.returnValue = ''; }
+});
 
 if ('serviceWorker' in navigator) window.addEventListener('load', () => navigator.serviceWorker.register('./sw.js').catch(error => console.warn('No se pudo registrar el service worker.', error)));
