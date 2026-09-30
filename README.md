@@ -1,28 +1,47 @@
-# Mono Cromat & Co. — PWA
+# Mono Cromat & Co. — Punto de venta
 
-Versión frontend responsive inspirada en la PWA de referencia de Distrito 53X.
+PWA responsive para ventas, clientes, inventario, cobranza y reportes. Funciona en modo local o con datos compartidos mediante Vercel Functions y Neon Postgres.
 
-## Ejecutar localmente
+## Desarrollo local
 
 ```bash
-python3 -m http.server 4173
+npm install
+npm run dev
 ```
 
-Abre `http://localhost:4173`.
+Abre `http://localhost:4173`. Sin variables de entorno, se abre el modo de demostración y los cambios quedan en el `localStorage` de ese navegador. Para usar Neon desde local, copia `.env.example` a `.env.local` y configura sus variables. No subas `.env.local` al repositorio.
 
-## Incluye
+## Desplegar en Vercel + Neon
 
-- Resumen operativo con indicadores, gráfica, cartera y actividad.
-- Ventas: alta de pedidos, filtros, detalle y entrega.
-- Clientes: alta, búsqueda, filtros, detalle y abonos.
-- Inventario: alta/edición, filtros, alertas de mínimo y márgenes.
-- Cobranza: cartera abierta, abonos e historial.
-- Reportes: ventas, cartera, rentabilidad e indicadores operativos.
-- Ajustes, exportación CSV e importación CSV en Clientes e Inventario.
-- Persistencia local con `localStorage`.
-- Logo oficial integrado en la navegación y en recibos.
-- Vista previa, impresión y descarga HTML de recibos desde Ventas.
-- Manifest y service worker para instalar como PWA.
-- Diseño responsive con Archivo, escala de pesos tipográficos, iconografía SVG lineal y sin emojis.
+1. Crea un proyecto Postgres en [Neon](https://neon.tech/) y copia la cadena de conexión **pooled** (`DATABASE_URL`). La API crea la tabla `mono_cromat_state` al primer inicio de sesión.
+2. Importa este repositorio en Vercel y configura estas variables en **Project Settings → Environment Variables** para Production. Si habilitas Preview, usa otra rama/base de Neon y otra contraseña/secreto; no conectes las previews a la base de producción.
+   - `DATABASE_URL`: cadena de conexión de Neon; solo la usa la función del servidor.
+   - `APP_PASSWORD`: contraseña única del espacio, de al menos 12 caracteres.
+   - `SESSION_SECRET`: secreto aleatorio de al menos 32 bytes. Puedes generarlo con `node -e "console.log(require('node:crypto').randomBytes(48).toString('base64url'))"`.
+3. Despliega con `npx vercel --prod` o desde el panel de Vercel.
 
-La app está preparada como base funcional de frontend; para producción habría que conectar autenticación, API y base de datos.
+La interfaz migra al primer inicio de sesión los datos previos guardados en ese navegador, si existen. Luego, Neon es la fuente de verdad y los datos de clientes/ventas no se guardan en `localStorage`. La API usa una sesión firmada en cookie `HttpOnly`, controla cambios concurrentes mediante revisión y el service worker nunca cachea respuestas privadas.
+
+### Alcance de autenticación actual
+
+La primera versión usa **una contraseña compartida para un solo espacio de trabajo**. No tiene usuarios individuales, roles ni varias sucursales. Para un equipo o datos de producción con requisitos de auditoría, conviene reemplazarla por autenticación individual (por ejemplo, un proveedor OIDC) y controles de acceso por usuario; el límite de intentos incluido en la función es de mejor esfuerzo y debe complementarse con protección de tráfico en Vercel.
+
+## Pruebas
+
+```bash
+npm test
+```
+
+Las pruebas cubren agregados por fecha, comparación semanal y aplicación de abonos a la venta abierta más antigua.
+
+## Funciones
+
+- Resumen, reportes y avisos operativos calculados a partir de los movimientos.
+- Ventas: alta, detalle, entrega, recibos, exportación y seguimiento de saldo.
+- Clientes: alta, búsqueda, ordenamiento, detalle e importación CSV validada.
+- Inventario: alta/edición, categorías, alertas de mínimo, márgenes e importación CSV validada.
+- Cobranza: registro de abonos aplicados a las ventas abiertas, saldos e historial.
+- Ajustes del negocio y preferencias persistentes.
+- Respaldo JSON completo e importación con confirmación; exportaciones CSV protegen contra fórmulas.
+- Navegación de pantalla completa desde el menú flotante inferior derecho, accesible por teclado.
+- PWA instalable, presentación responsive e indicadores de sincronización.
